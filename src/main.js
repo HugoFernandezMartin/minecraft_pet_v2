@@ -10,6 +10,7 @@ import { MobMenu } from './interaction/MobMenu.js';
 
 const host = window.mobHost ?? null;
 const { settings, save } = await connectSettings();
+const platform = (await host?.getPlatform()) ?? { interactive: true };
 
 const stage = new Stage(document.getElementById('app'));
 const screen = new ScreenSpace(stage);
@@ -17,8 +18,9 @@ const screen = new ScreenSpace(stage);
 let mobName = MOBS[settings.mob] ? settings.mob : 'bee';
 const character = new Character({ mob: createMob(mobName), scene: stage.scene, settings });
 stage.scene.add(character.mob.root);
-const menu = new MobMenu({ settings, save });
-const director = new PointerDirector({ character, screen, host, canvas: stage.renderer.domElement, menu });
+// Pointer interaction is optional (off in the passive/click-through Linux mode); the components stay intact.
+const menu = platform.interactive ? new MobMenu({ settings, save }) : null;
+const director = platform.interactive ? new PointerDirector({ character, screen, host, canvas: stage.renderer.domElement, menu }) : null;
 
 /** Swap the pet's body in place; the character keeps its position, mood and state. */
 function applyMob(name) {
@@ -47,7 +49,7 @@ function updatePlacement() {
 const loop = new Loop((dt, t) => {
   if (settings.mob !== mobName) applyMob(settings.mob);
   updatePlacement();
-  director.update(dt);
+  director?.update(dt);
   character.update(dt, t);
   stage.render();
 });

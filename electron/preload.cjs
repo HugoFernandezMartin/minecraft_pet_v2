@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('mobHost', {
+  getPlatform: () => ipcRenderer.invoke('platform:get'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.send('settings:set', patch),
   onSettings: (fn) => ipcRenderer.on('settings', (_e, s) => fn(s)),

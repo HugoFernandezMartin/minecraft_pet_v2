@@ -25,7 +25,10 @@ if (dev) {
   }
 }
 
-const electron = spawn(require('electron'), ['.'], { stdio: 'inherit', env });
+// On Linux Electron must run through XWayland. Chromium picks its Ozone backend while it parses the command line,
+// before any JS runs, so this has to be a real argument (app.commandLine.appendSwitch in the main process is too late).
+const args = process.platform === 'linux' ? ['.', '--ozone-platform=x11'] : ['.'];
+const electron = spawn(require('electron'), args, { stdio: 'inherit', env });
 const stop = () => {
   vite?.kill();
   electron.kill();

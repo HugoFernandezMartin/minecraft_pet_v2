@@ -2,6 +2,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, powerMonitor, screen } from 'electron';
 import { MOBS, SIZES, loadSettings, saveSettings } from './settings.js';
+import { FOCUSABLE, configureProcess, configureShownWindow, configureWindow, platform } from './platform/linux.js';
+
+configureProcess();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
@@ -24,6 +27,7 @@ if (!app.requestSingleInstanceLock()) {
 // A short strip along the bottom normally; the full work area while the bee is being carried or falling.
 function stripBounds() {
   const { workArea } = screen.getPrimaryDisplay();
+  if (platform.fixedWindow) return { ...workArea };
   const height = expanded ? workArea.height : Math.min(workArea.height, Math.round(settings.petSize * STRIP_HEIGHT_RATIO));
   return { x: workArea.x, y: workArea.y + workArea.height - height, width: workArea.width, height };
 }
@@ -39,7 +43,7 @@ function createWindow() {
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
-    focusable: false,
+    focusable: FOCUSABLE,
     skipTaskbar: true,
     alwaysOnTop: true,
     acceptFirstMouse: true,
@@ -52,14 +56,23 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
-  win.setAlwaysOnTop(true, 'floating');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.setIgnoreMouseEvents(true, { forward: true });
-  win.once('ready-to-show', () => win.showInactive());
+  configureWindow(win);
+  win.once('ready-to-show', () => {
+    win.showInactive();
+    configureShownWindow(win);
+  });
   win.on('closed', () => (win = null));
 
   if (DEV_URL) win.loadURL(DEV_URL);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+}
+
+/** Re-apply bounds only when they actually changed (a no-op setBounds still costs a resize round trip on X11). */
+function syncBounds() {
+  if (!win) return;
+  const next = stripBounds();
+  const cur = win.getBounds();
+  if (cur.x !== next.x || cur.y !== next.y || cur.width !== next.width || cur.height !== next.height) win.setBounds(next);
 }
 
 const send = (channel, payload) => win?.webContents.send(channel, payload);
@@ -69,10 +82,10 @@ function applySettings(patch) {
   const prevSize = settings.petSize;
   Object.assign(settings, patch);
   saveSettings(settings);
-  if (settings.petSize !== prevSize) win?.setBounds(stripBounds());
+  if (settings.petSize !== prevSize) syncBounds();
   if ('openAtLogin' in patch) app.setLoginItemSettings({ openAtLogin: settings.openAtLogin });
   send('settings', settings);
-  buildTray();
+  if (platform.tray) buildTray();
 }
 
 function buildTray() {
@@ -123,27 +136,30 @@ function pollIdle() {
 
 ipcMain.handle('settings:get', () => settings);
 ipcMain.on('settings:set', (_e, patch) => applySettings(patch));
-ipcMain.on('pointer:over', (_e, over) => win?.setIgnoreMouseEvents(!over, { forward: true }));
+ipcMain.handle('platform:get', () => platform);
+ipcMain.on('pointer:over', (_e, over) => {
+  if (platform.interactive) win?.setIgnoreMouseEvents(!over, { forward: true });
+});
 ipcMain.on('window:expand', (_e, on) => {
   if (on === expanded) return;
   expanded = on;
-  win?.setBounds(stripBounds());
+  syncBounds();
 });
 ipcMain.on('state', (_e, name) => {
   if (ASLEEP.has(name) !== ASLEEP.has(beeState)) {
     beeState = name;
-    buildTray();
+    if (platform.tray) buildTray();
   } else beeState = name;
 });
 
 app.whenReady().then(() => {
   app.dock?.hide();
   createWindow();
-  buildTray();
+  if (platform.tray) buildTray();
   setInterval(pollIdle, IDLE_POLL_MS);
-  screen.on('display-metrics-changed', () => win?.setBounds(stripBounds()));
-  screen.on('display-added', () => win?.setBounds(stripBounds()));
-  screen.on('display-removed', () => win?.setBounds(stripBounds()));
+  screen.on('display-metrics-changed', syncBounds);
+  screen.on('display-added', syncBounds);
+  screen.on('display-removed', syncBounds);
 });
 
 app.on('window-all-closed', () => app.quit());
