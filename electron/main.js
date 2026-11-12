@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, powerMonitor, screen } from 'electron';
+import { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, powerMonitor, screen, globalShortcut } from 'electron';
 import { MOBS, SIZES, loadSettings, saveSettings } from './settings.js';
 import { FOCUSABLE, configureProcess, configureShownWindow, configureWindow, platform } from './platform/linux.js';
 
@@ -88,6 +88,17 @@ function applySettings(patch) {
   if (platform.tray) buildTray();
 }
 
+function toggleMob() {
+  const mobNames = Object.keys(MOBS);
+  const currentIndex = mobNames.indexOf(settings.mob);
+  const nextIndex = (currentIndex + 1) % mobNames.length;
+  const next = mobNames[nextIndex];
+
+  applySettings({ mob: next });
+
+  console.log(`[Shortcut] Mob changed: ${settings.mob} -> ${next}`);
+}
+
 function buildTray() {
   if (!tray) {
     const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'trayTemplate.png'));
@@ -155,6 +166,15 @@ ipcMain.on('state', (_e, name) => {
 app.whenReady().then(() => {
   app.dock?.hide();
   createWindow();
+
+  const registered = globalShortcut.register('F15', toggleMob);
+
+  if (registered) {
+    console.log('[Shortcut] F15 registered: toggle mob');
+  } else {
+    console.error('[Shortcut] Failed to register F15');
+  }
+
   if (platform.tray) buildTray();
   setInterval(pollIdle, IDLE_POLL_MS);
   screen.on('display-metrics-changed', syncBounds);
@@ -164,3 +184,6 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => app.quit());
 app.on('second-instance', () => win?.showInactive());
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
